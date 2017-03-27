@@ -1,10 +1,4 @@
-function readBVR(filename::String)
-    DataInfo, ChanInfo  = readHDR(filename)
-    trial               = readEEG(filename,DataInfo,ChanInfo)
-    Markers             = readMRK(filename)
-    EEG                 = Kronos(trial,ChanInfo[1,:],Markers,get(DataInfo,"SamplingRate",NaN));
-    return EEG
-end
+module BVR
 
 function readEEG(filename::String,DataInfo,ChanInfo)
     open(string(filename,".eeg")) do f
@@ -43,18 +37,18 @@ function getMarkerSegment(x)
     k3          = search(x,',',k2+1)
     MarkerCode  = x[k1+1:k2-1]
     MarkerSeg   = parse(Int64,x[k2+1:k3-1])
-    return Mrk  = hcat(MarkerCode,MarkerSeg)
+    return hcat(MarkerCode,MarkerSeg)
 end
 
 function readHDR(filename::String)
-    Fs            = NaN;
-    dataFormat    = "";
-    bitFormat     = NaN;
-    dataOrient    = "";
-    binaryFormat  = "";
-    NumChan       = NaN;
-    ChanInfo      = [];
-    DataInfo      = [];
+    Fs            = Nullable{Int32}()
+    dataFormat    = Nullable{String}()
+    bitFormat     = Nullable{Int32}()
+    dataOrient    = Nullable{String}()
+    binaryFormat  = Nullable{String}()
+    NumChan       = Nullable{Int32}()
+    ChanInfo      = []
+    DataInfo      = []
     doCollect     = false;
     open(string(filename,".vhdr")) do f
         while !eof(f)
@@ -84,20 +78,19 @@ function readHDR(filename::String)
 
         end
     end
-    DataInfo = Dict("SamplingRate"=>Fs,"ChannelNumber"=>NumChan,"Encoding"=>binaryFormat,"ByteLength"=>bitFormat,"Format"=>dataFormat,"Orientation"=>dataOrient)
-    return DataInfo, ChanInfo
+    DataInfo = (Dict("BirthFile"=>filename,"ChannelNumber"=>NumChan,"Encoding"=>binaryFormat,"ByteLength"=>bitFormat,"Format"=>dataFormat,"Orientation"=>dataOrient))
+    return Fs, DataInfo, ChanInfo
 end
 
 function getChanInfo(x::String)
-    h         = search(x,'h');
-    s         = search(x,'=');
-    e         = search(x,',');
-    v         = search(x,'V');
-    name      = x[s+1:e-1];
-    id        = parse(Int64,x[h+1:s-1]);
-    res       = parse(Float32,x[e+2:v-4]);
-    info      = [name;res;id]
-    return info
+    s1         = search(x,'h');
+    s2         = search(x,'=');
+    s3         = search(x,',');
+    s4         = search(x,'V');
+    name      = x[s2+1:s3-1];
+    id        = parse(Int64,x[s1+1:s2-1]);
+    res       = parse(Float32,x[s3+2:s4-4]);
+    return [name;res;id]
 end
 
 function getGeneralInfo(x::String)
@@ -114,4 +107,13 @@ function getEncoding(x::String)
     TypeEncode  = Dict("INT_16" => "Int16","UINT_16" => "UInt16","FLOAT_32" => "Float32");
     BitEncode    = Dict("INT_16" => 2,"UINT_16" => 2,"FLOAT_32" => 4);
     return TypeEncode[getDataInfo(x)], BitEncode[getDataInfo(x)];
+end
+end
+
+function readBVR(filename::String)
+    Fs, DataInfo, ChanInfo      = BVR.readHDR(filename)
+    trial                       = BVR.readEEG(filename,DataInfo,ChanInfo)
+    Markers                     = BVR.readMRK(filename)
+    EEG                         = Kronos(trial,ChanInfo[1,:],Markers,Fs,DataInfo);
+    return EEG
 end

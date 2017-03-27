@@ -3,4 +3,5 @@ type Kronos
     labels::Array{String}
     Markers
     SamplingRate::Number
+    Provenance::Dict
 end
