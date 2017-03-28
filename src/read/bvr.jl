@@ -1,7 +1,8 @@
 module BVR
 
-function readEEG(filename::String,DataInfo,ChanInfo)
-    open(string(filename,".eeg")) do f
+function readEEG(DataInfo::Dict,ChanInfo)
+    Filename = get(DataInfo,"eegFile","")
+    open(Filename) do f
         FileSize    = position(seekend(f))
         FrameNumber = Int64(FileSize/( get(DataInfo,"ByteLength",2) * get(DataInfo,"ChannelNumber",32)))
         FileDim     = (get(DataInfo,"ChannelNumber",32),FrameNumber)
@@ -12,10 +13,10 @@ function readEEG(filename::String,DataInfo,ChanInfo)
     return trial
 end
 
-function readMRK(filename::String)
+function readMRK(DataInfo::Dict)
     doCollect   = false
     MarkerInfo  = hcat(Array{String}(0,1),Array{Int64}(0,1))
-    open(string(filename,".vmrk")) do f
+    open(get(DataInfo,"vmrkFile","")) do f
         while !eof(f)
             x = readline(f)
             # Read Channel-Specific Info
@@ -40,7 +41,10 @@ function getMarkerSegment(x)
     return hcat(MarkerCode,MarkerSeg)
 end
 
-function readHDR(filename::String)
+function readHDR(FilePath::String,Filename::String)
+    vhdrFilename  = string(FilePath,Filename);
+    vmrkFilename  = Nullable{String}()
+    eegFilename   = Nullable{String}()
     Fs            = Nullable{Int32}()
     dataFormat    = Nullable{String}()
     bitFormat     = Nullable{Int32}()
@@ -50,11 +54,17 @@ function readHDR(filename::String)
     ChanInfo      = []
     DataInfo      = []
     doCollect     = false;
-    open(string(filename,".vhdr")) do f
+    open(vhdrFilename) do f
         while !eof(f)
             x = readline(f)
 
           # Read General Info
+            if contains(x,"MarkerFile=");
+                vmrkFilename = string(FilePath,x[search(x,'=')+1:end-2])
+            end
+            if contains(x,"DataFile=");
+                eegFilename = string(FilePath,x[search(x,'=')+1:end-2])
+            end
             if contains(x,"Sampling Rate [Hz]:");
                 Fs = parse(Int32,getGeneralInfo(x));
             end
@@ -78,7 +88,7 @@ function readHDR(filename::String)
 
         end
     end
-    DataInfo = (Dict("BirthFile"=>filename,"ChannelNumber"=>NumChan,"Encoding"=>binaryFormat,"ByteLength"=>bitFormat,"Format"=>dataFormat,"Orientation"=>dataOrient))
+    DataInfo = (Dict("vhdrFile"=>vhdrFilename,"vmrkFile"=>vmrkFilename,"eegFile"=>eegFilename,"ChannelNumber"=>NumChan,"Encoding"=>binaryFormat,"ByteLength"=>bitFormat,"Format"=>dataFormat,"Orientation"=>dataOrient))
     return Fs, DataInfo, ChanInfo
 end
 
@@ -104,16 +114,32 @@ function getDataInfo(x::String)
 end
 
 function getEncoding(x::String)
-    TypeEncode  = Dict("INT_16" => "Int16","UINT_16" => "UInt16","FLOAT_32" => "Float32");
+    TypeEncode   = Dict("INT_16" => "Int16","UINT_16" => "UInt16","FLOAT_32" => "Float32");
     BitEncode    = Dict("INT_16" => 2,"UINT_16" => 2,"FLOAT_32" => 4);
     return TypeEncode[getDataInfo(x)], BitEncode[getDataInfo(x)];
 end
 end
 
-function readBVR(filename::String)
-    Fs, DataInfo, ChanInfo      = BVR.readHDR(filename)
-    trial                       = BVR.readEEG(filename,DataInfo,ChanInfo)
-    Markers                     = BVR.readMRK(filename)
+function readBVR(FilePath::String,Filename::String)
+
+    Fs, DataInfo, ChanInfo      = BVR.readHDR(FilePath,Filename)
+    trial                       = BVR.readEEG(DataInfo,ChanInfo)
+    Markers                     = BVR.readMRK(DataInfo)
     EEG                         = Kronos(trial,ChanInfo[1,:],Markers,Fs,DataInfo);
+    # TODO Fix issue with lost path for vmrkFile and eegFile #filepath
+    return EEG
+end
+
+
+function readBVR(FullFilename::String)
+    Fileparts                   = split(FullFilename,'/')
+    Filename                    = convert(String,Fileparts[end])
+    s                           = search(FullFilename,Fileparts[end])
+    FilePath                    = FullFilename[1:s[1]-1]
+    Fs, DataInfo, ChanInfo      = BVR.readHDR(FilePath,Filename)
+    trial                       = BVR.readEEG(DataInfo,ChanInfo)
+    Markers                     = BVR.readMRK(DataInfo)
+    EEG                         = Kronos(trial,ChanInfo[1,:],Markers,Fs,DataInfo);
+    # TODO Fix issue with lost path for vmrkFile and eegFile #filepath
     return EEG
 end
